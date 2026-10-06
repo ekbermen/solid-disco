@@ -1,0 +1,793 @@
+name: Build APK
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Proje dosyalarini olustur
+        run: |
+          mkdir -p proje && cd proje
+          mkdir -p app
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.novax.app"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "com.novax.app"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "0.1"
+              }
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+
+          dependencies {
+              implementation("androidx.core:core-ktx:1.13.1")
+          }
+          EOF
+          mkdir -p app/src/main
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+              <queries>
+                  <intent>
+                      <action android:name="android.speech.RecognitionService" />
+                  </intent>
+                  <intent>
+                      <action android:name="android.intent.action.TTS_SERVICE" />
+                  </intent>
+              </queries>
+
+              <application
+                  android:allowBackup="false"
+                  android:icon="@android:drawable/ic_btn_speak_now"
+                  android:label="Novax"
+                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:configChanges="orientation|screenSize|keyboardHidden|keyboard|smallestScreenSize|screenLayout"
+                      android:screenOrientation="portrait"
+                      android:windowSoftInputMode="adjustResize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <service
+                      android:name=".NovaxService"
+                      android:exported="false"
+                      android:foregroundServiceType="microphone" />
+              </application>
+          </manifest>
+          EOF
+          mkdir -p app/src/main/assets
+          cat > app/src/main/assets/index.html <<'EOF'
+          <!DOCTYPE html>
+          <html lang="tr">
+          <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+          <title>Novax</title>
+          <style>
+          :root{--bg:#06090f;--panel:#0d131d;--line:#1b2636;--text:#e6edf6;--mute:#7d8da3;--c1:#22d3ee;--c2:#8b5cf6;--err:#f87171;--o1:#22d3ee;--o2:#8b5cf6}
+          *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
+          html,body{height:100%;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Roboto,sans-serif;overflow:hidden}
+          body[data-state=listening]{--o1:#34d399;--o2:#22d3ee}
+          body[data-state=thinking]{--o1:#fbbf24;--o2:#f97316}
+          body[data-state=speaking]{--o1:#a78bfa;--o2:#22d3ee}
+          #app{height:100%;display:flex;flex-direction:column;background:radial-gradient(120% 55% at 50% -8%,#12304a 0%,transparent 62%),var(--bg)}
+          header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px 4px}
+          .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.3em;font-size:15px}
+          .dot{width:8px;height:8px;border-radius:50%;background:#475569}
+          .dot.on{background:#34d399;box-shadow:0 0 10px #34d399}
+          .iconbtn{width:40px;height:40px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--text);display:grid;place-items:center}
+          svg{display:block}
+          #stage{display:flex;flex-direction:column;align-items:center;padding:2px 0 6px;transition:all .25s;overflow:hidden;max-height:230px}
+          .kb #stage{max-height:0;opacity:0;padding:0}
+          .orb{position:relative;width:120px;height:120px;margin:8px 0 4px;--lvl:0}
+          .orb b{position:absolute;inset:24px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff8,var(--o1) 38%,var(--o2) 100%);box-shadow:0 0 44px color-mix(in srgb,var(--o1) 55%,transparent),inset 0 0 18px #ffffff40;transition:transform .12s}
+          .orb i{position:absolute;border-radius:50%;border:1px solid color-mix(in srgb,var(--o1) 40%,transparent)}
+          .orb i:nth-child(1){inset:10px}
+          .orb i:nth-child(2){inset:0;border-color:color-mix(in srgb,var(--o2) 35%,transparent)}
+          .orb i:nth-child(3){inset:-10px;border-color:color-mix(in srgb,var(--o1) 18%,transparent)}
+          body[data-state=idle] .orb b{animation:breathe 4s ease-in-out infinite}
+          body[data-state=listening] .orb b{transform:scale(calc(1 + var(--lvl)*.32))}
+          body[data-state=listening] .orb i:nth-child(2){animation:ping 1.4s ease-out infinite}
+          body[data-state=thinking] .orb i{border-style:dashed;animation:spin 3s linear infinite}
+          body[data-state=thinking] .orb i:nth-child(2){animation-direction:reverse}
+          body[data-state=thinking] .orb b{animation:breathe 1.2s ease-in-out infinite}
+          body[data-state=speaking] .orb b{animation:talk .7s ease-in-out infinite}
+          @keyframes breathe{0%,100%{transform:scale(.96)}50%{transform:scale(1.05)}}
+          @keyframes talk{0%,100%{transform:scale(.95)}25%{transform:scale(1.1)}50%{transform:scale(1)}75%{transform:scale(1.14)}}
+          @keyframes spin{to{transform:rotate(360deg)}}
+          @keyframes ping{0%{transform:scale(1);opacity:1}100%{transform:scale(1.35);opacity:0}}
+          #status{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--mute)}
+          #caption{min-height:20px;margin-top:6px;padding:0 24px;text-align:center;font-size:14px;color:#a5f3fc}
+          #chat{flex:1;overflow-y:auto;padding:8px 14px 12px;display:flex;flex-direction:column;gap:10px}
+          .msg{max-width:86%;padding:10px 14px;border-radius:18px;font-size:15px;line-height:1.5;word-wrap:break-word;overflow-wrap:anywhere;animation:in .25s ease}
+          @keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+          .msg.user{align-self:flex-end;background:linear-gradient(135deg,#0e7490,#6d28d9);border-bottom-right-radius:6px}
+          .msg.bot{align-self:flex-start;background:var(--panel);border:1px solid var(--line);border-bottom-left-radius:6px}
+          .msg.err{border-color:#7f1d1d;color:var(--err)}
+          .msg code{background:#070b12;padding:1px 5px;border-radius:5px;font-size:13px;font-family:ui-monospace,monospace}
+          .msg pre{background:#070b12;padding:10px;border-radius:10px;font-size:12.5px;font-family:ui-monospace,monospace;overflow-x:auto;margin:6px 0;white-space:pre-wrap}
+          .dots{display:flex;gap:5px;padding:14px 16px}
+          .dots span{width:7px;height:7px;border-radius:50%;background:var(--c1);animation:bl 1s infinite}
+          .dots span:nth-child(2){animation-delay:.15s}.dots span:nth-child(3){animation-delay:.3s}
+          @keyframes bl{0%,80%,100%{opacity:.25;transform:scale(.8)}40%{opacity:1;transform:scale(1.1)}}
+          #empty{margin:auto;text-align:center;color:var(--mute);font-size:14px;padding:0 16px}
+          #empty h2{color:var(--text);font-size:18px;margin-bottom:6px;font-weight:600}
+          .chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:14px}
+          .chip{border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--text);border-radius:16px;padding:8px 13px;font-size:13px}
+          footer{padding:8px 12px 12px;display:flex;gap:8px;align-items:flex-end;border-top:1px solid var(--line);background:rgba(6,9,15,.92)}
+          #inp{flex:1;resize:none;max-height:110px;min-height:46px;padding:12px 16px;border-radius:23px;border:1px solid var(--line);background:var(--panel);color:var(--text);font:inherit;font-size:15px;outline:none}
+          #inp:focus{border-color:#155e75}
+          .round{width:46px;height:46px;border-radius:50%;border:none;display:grid;place-items:center;flex:none;color:#fff}
+          #send{background:var(--c1);color:#041016}
+          #mic{background:linear-gradient(135deg,var(--c1),var(--c2))}
+          #mic.live{background:#ef4444}
+          #sheet{position:fixed;inset:0;background:#000a;display:flex;align-items:flex-end;z-index:9;transition:opacity .2s}
+          #sheet.hide{opacity:0;pointer-events:none}
+          .card{width:100%;background:#0b111a;border-top:1px solid var(--line);border-radius:22px 22px 0 0;padding:18px 18px 24px;transform:translateY(0);transition:transform .25s}
+          #sheet.hide .card{transform:translateY(40px)}
+          .card h3{font-size:17px;margin-bottom:12px}
+          .card label{display:block;font-size:12px;color:var(--mute);margin:14px 0 6px;letter-spacing:.06em}
+          .row{display:flex;gap:8px}
+          .row input{flex:1;min-width:0;padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:14px;outline:none}
+          .btn{padding:11px 14px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--text);font-size:14px}
+          .btn.pri{background:var(--c1);color:#041016;border:none;font-weight:600}
+          .btn.wide{width:100%;margin-top:10px}
+          .btn.danger{color:var(--err)}
+          .seg{display:flex;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+          .seg button{flex:1;padding:10px;background:none;border:none;color:var(--mute);font-size:14px}
+          .seg button.on{background:#12304a;color:#a5f3fc}
+          .item{display:flex;justify-content:space-between;align-items:center;margin-top:16px;font-size:14px}
+          .sw{width:48px;height:28px;border-radius:14px;border:none;background:#243044;position:relative;transition:background .2s}
+          .sw::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:transform .2s}
+          .sw.on{background:#10b981}.sw.on::after{transform:translateX(20px)}
+          #toast{position:fixed;left:50%;bottom:90px;transform:translate(-50%,20px);background:#1e293b;color:#fff;padding:10px 16px;border-radius:14px;font-size:13px;opacity:0;transition:all .25s;pointer-events:none;z-index:20;max-width:85%;text-align:center}
+          #toast.show{opacity:1;transform:translate(-50%,0)}
+          </style>
+          </head>
+          <body data-state="idle">
+          <div id="app">
+            <header>
+              <div class="brand"><span class="dot" id="dot"></span>NOVAX</div>
+              <button class="iconbtn" id="gear" aria-label="Ayarlar">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>
+              </button>
+            </header>
+            <section id="stage">
+              <div class="orb" id="orb"><i></i><i></i><i></i><b></b></div>
+              <div id="status">Hazır</div>
+              <div id="caption"></div>
+            </section>
+            <main id="chat">
+              <div id="empty">
+                <h2>Merhaba, ben Novax</h2>
+                Yazabilir ya da mikrofona basıp konuşabilirsin.
+                <div class="chips">
+                  <button class="chip">Kendini tanıt</button>
+                  <button class="chip">Bana kısa bir fıkra anlat</button>
+                  <button class="chip">Python'da liste nasıl sıralanır?</button>
+                </div>
+              </div>
+            </main>
+            <footer>
+              <textarea id="inp" rows="1" placeholder="Bir mesaj yaz…"></textarea>
+              <button class="round" id="mic" aria-label="Konuş">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+              </button>
+              <button class="round" id="send" aria-label="Gönder">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>
+              </button>
+            </footer>
+          </div>
+
+          <div id="sheet" class="hide">
+            <div class="card">
+              <h3>Ayarlar</h3>
+              <label>GROQ API ANAHTARI</label>
+              <div class="row"><input id="key" type="password" placeholder="gsk_..." autocomplete="off"><button class="btn pri" id="savekey">Kaydet</button></div>
+              <label>SESLİ CEVAP</label>
+              <div class="seg" id="seg"><button data-v="auto">Otomatik</button><button data-v="always">Hep</button><button data-v="off">Kapalı</button></div>
+              <div style="font-size:12px;color:var(--mute);margin-top:6px">Otomatik: sesle sorarsan sesle, yazarsan yazıyla cevap verir.</div>
+              <div class="item"><span>Arka plan servisi</span><button class="sw" id="svc" aria-label="Servis"></button></div>
+              <button class="btn wide" id="batt">Pil kısıtlamasını kaldır</button>
+              <button class="btn wide danger" id="clear">Sohbeti temizle</button>
+              <button class="btn wide" id="close">Kapat</button>
+            </div>
+          </div>
+          <div id="toast"></div>
+
+          <script>
+          const $=s=>document.querySelector(s);
+          const A=window.Android;
+          let state='idle',busy=false,history=[],pending={},nid=0,voiceMode='auto';
+          try{history=JSON.parse(localStorage.getItem('nx_hist')||'[]');voiceMode=localStorage.getItem('nx_vm')||'auto'}catch(e){}
+          function save(){try{localStorage.setItem('nx_hist',JSON.stringify(history.slice(-40)))}catch(e){}}
+          const LABEL={idle:'Hazır',listening:'Dinliyorum…',thinking:'Düşünüyorum…',speaking:'Konuşuyorum…'};
+          function setState(s){
+            state=s;document.body.dataset.state=s;$('#status').textContent=LABEL[s];
+            $('#mic').classList.toggle('live',s==='listening'||s==='speaking');
+            if(s!=='listening'){$('#orb').style.setProperty('--lvl',0)}
+            if(s==='idle'||s==='speaking')$('#caption').textContent='';
+          }
+          function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove('show'),2400)}
+          function esc(t){return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+          function md(t){
+            let h=esc(t);
+            h=h.replace(/```(?:\w+)?\n?([\s\S]*?)```/g,(m,c)=>'<pre>'+c.replace(/\n$/,'')+'</pre>');
+            h=h.replace(/`([^`\n]+)`/g,'<code>$1</code>');
+            h=h.replace(/\*\*([^*\n]+)\*\*/g,'<b>$1</b>');
+            return h.replace(/\n/g,'<br>');
+          }
+          function clean(t){return t.replace(/```[\s\S]*?```/g,' kod bloğu ').replace(/[*_`#>~]/g,'').replace(/\s+/g,' ').trim()}
+          function scrollDown(){const c=$('#chat');c.scrollTop=c.scrollHeight}
+          function hideEmpty(){const e=$('#empty');if(e)e.style.display='none'}
+          function addMsg(role,text,cls){
+            const d=document.createElement('div');
+            d.className='msg '+role+(cls?' '+cls:'');
+            d.innerHTML=role==='user'?esc(text).replace(/\n/g,'<br>'):md(text);
+            $('#chat').appendChild(d);scrollDown();return d;
+          }
+          function showDots(){const d=document.createElement('div');d.className='msg bot dots';d.id='dots';d.innerHTML='<span></span><span></span><span></span>';$('#chat').appendChild(d);scrollDown()}
+          function hideDots(){const d=$('#dots');if(d)d.remove()}
+
+          function send(text,viaVoice){
+            text=(text||'').trim();
+            if(!text||busy)return;
+            if(!A){toast('Bu sayfa sadece Novax uygulamasında çalışır');return}
+            if(!A.getKey()){openSheet();toast('Önce Groq API anahtarını gir');return}
+            A.stopSpeaking();
+            hideEmpty();addMsg('user',text);
+            history.push({role:'user',content:text});save();
+            const id=++nid;pending[id]={voice:!!viaVoice};busy=true;
+            showDots();setState('thinking');
+            A.chat(id,JSON.stringify(history.slice(-14)));
+          }
+          window.onChatResult=function(id,ok,text){
+            const p=pending[id];delete pending[id];busy=false;hideDots();
+            if(!ok){
+              addMsg('bot',text,'err');
+              if(history.length&&history[history.length-1].role==='user'){history.pop();save()}
+              setState('idle');return;
+            }
+            addMsg('bot',text);history.push({role:'assistant',content:text});save();
+            const speak=voiceMode==='always'||(voiceMode==='auto'&&p&&p.voice);
+            if(speak){setState('speaking');A.speak(clean(text))}else setState('idle');
+          };
+          window.onVoiceResult=function(t){
+            $('#caption').textContent='';
+            if(!t){setState('idle');toast('Seni duyamadım, tekrar dene');return}
+            setState('idle');send(t,true);
+          };
+          window.onPartial=t=>{$('#caption').textContent=t};
+          window.onListenState=s=>{if(s==='listening')setState('listening');else if(s==='processing')setState('thinking')};
+          window.onListenError=m=>{setState('idle');$('#caption').textContent='';toast(m)};
+          window.onLevel=r=>{if(state==='listening'){$('#orb').style.setProperty('--lvl',Math.max(0,Math.min(1,(r+2)/12)).toFixed(2))}};
+          window.onTts=s=>{if(s==='start')setState('speaking');else if(state==='speaking')setState('idle')};
+          window.onServiceState=on=>{$('#dot').classList.toggle('on',!!on);$('#svc').classList.toggle('on',!!on)};
+          window.toast=toast;
+
+          $('#send').onclick=()=>{const i=$('#inp');const t=i.value;i.value='';i.style.height='auto';send(t,false)};
+          $('#inp').addEventListener('input',e=>{e.target.style.height='auto';e.target.style.height=Math.min(110,e.target.scrollHeight)+'px'});
+          $('#inp').addEventListener('focus',()=>document.body.classList.add('kb'));
+          $('#inp').addEventListener('blur',()=>document.body.classList.remove('kb'));
+          $('#mic').onclick=()=>{
+            if(!A){toast('Bu sayfa sadece Novax uygulamasında çalışır');return}
+            if(state==='listening'){A.stopListen();return}
+            if(state==='speaking'){A.stopSpeaking();setState('idle');return}
+            if(busy)return;
+            if(!A.getKey()){openSheet();toast('Önce Groq API anahtarını gir');return}
+            A.listen();
+          };
+          document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>send(c.textContent,false));
+
+          function openSheet(){
+            if(A)$('#key').value=A.getKey();
+            document.querySelectorAll('#seg button').forEach(b=>b.classList.toggle('on',b.dataset.v===voiceMode));
+            $('#sheet').classList.remove('hide');
+          }
+          function closeSheet(){$('#sheet').classList.add('hide')}
+          $('#gear').onclick=openSheet;
+          $('#close').onclick=closeSheet;
+          $('#sheet').addEventListener('click',e=>{if(e.target.id==='sheet')closeSheet()});
+          $('#savekey').onclick=()=>{if(A){A.saveKey($('#key').value);toast('Anahtar kaydedildi')}};
+          document.querySelectorAll('#seg button').forEach(b=>b.onclick=()=>{
+            voiceMode=b.dataset.v;try{localStorage.setItem('nx_vm',voiceMode)}catch(e){}
+            document.querySelectorAll('#seg button').forEach(x=>x.classList.toggle('on',x===b));
+          });
+          $('#svc').onclick=()=>{if(A)A.toggleService()};
+          $('#batt').onclick=()=>{if(A)A.battery()};
+          $('#clear').onclick=()=>{
+            history=[];save();
+            document.querySelectorAll('#chat .msg').forEach(m=>m.remove());
+            $('#empty').style.display='';closeSheet();
+          };
+
+          if(history.length){hideEmpty();history.forEach(m=>addMsg(m.role==='user'?'user':'bot',m.content))}
+          if(A)onServiceState(A.isServiceRunning());
+          </script>
+          </body>
+          </html>
+          EOF
+          mkdir -p app/src/main/java/com/novax/app
+          cat > app/src/main/java/com/novax/app/MainActivity.kt <<'EOF'
+          package com.novax.app
+
+          import android.Manifest
+          import android.app.Activity
+          import android.content.Intent
+          import android.content.pm.PackageManager
+          import android.graphics.Color
+          import android.net.Uri
+          import android.os.Build
+          import android.os.Bundle
+          import android.os.PowerManager
+          import android.provider.Settings
+          import android.speech.RecognitionListener
+          import android.speech.RecognizerIntent
+          import android.speech.SpeechRecognizer
+          import android.speech.tts.TextToSpeech
+          import android.speech.tts.UtteranceProgressListener
+          import android.webkit.JavascriptInterface
+          import android.webkit.WebChromeClient
+          import android.webkit.WebView
+          import androidx.core.content.ContextCompat
+          import org.json.JSONArray
+          import org.json.JSONObject
+          import java.net.HttpURLConnection
+          import java.net.URL
+          import java.net.UnknownHostException
+          import java.util.Locale
+
+          class MainActivity : Activity() {
+
+              companion object {
+                  const val MODEL = "llama-3.3-70b-versatile"
+                  const val SYSTEM_PROMPT =
+                      "Sen Novax'sın, Türkçe konuşan zeki ve samimi bir yapay zeka asistanısın. " +
+                      "Kısa, net ve doğal cevap ver. Cevapların sesli okunabilir, o yüzden emoji ve gereksiz uzun listelerden kaçın. " +
+                      "Henüz telefonu kontrol edemezsin (uygulama açma, arama yapma, mesaj gönderme gibi). " +
+                      "Bunlar istenirse yakında ekleneceğini söyle, yapmış gibi davranma."
+              }
+
+              private lateinit var web: WebView
+              private var tts: TextToSpeech? = null
+              private var ttsReady = false
+              private var recognizer: SpeechRecognizer? = null
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  window.statusBarColor = Color.parseColor("#06090f")
+                  window.navigationBarColor = Color.parseColor("#06090f")
+
+                  web = WebView(this)
+                  web.setBackgroundColor(Color.parseColor("#06090f"))
+                  web.settings.javaScriptEnabled = true
+                  web.settings.domStorageEnabled = true
+                  web.webChromeClient = WebChromeClient()
+                  web.addJavascriptInterface(Bridge(), "Android")
+                  setContentView(web)
+                  web.loadUrl("file:///android_asset/index.html")
+
+                  initTts()
+              }
+
+              override fun onResume() {
+                  super.onResume()
+                  js("typeof onServiceState==='function'&&onServiceState(${NovaxService.running})")
+              }
+
+              override fun onDestroy() {
+                  recognizer?.destroy()
+                  tts?.stop()
+                  tts?.shutdown()
+                  super.onDestroy()
+              }
+
+              @Deprecated("Deprecated in Java")
+              override fun onBackPressed() {
+                  moveTaskToBack(true)
+              }
+
+              private fun js(code: String) {
+                  runOnUiThread { web.evaluateJavascript(code, null) }
+              }
+
+              private fun prefs() = getSharedPreferences("novax", MODE_PRIVATE)
+
+              // ---------- TTS ----------
+              private fun initTts() {
+                  tts = TextToSpeech(this) { status ->
+                      if (status == TextToSpeech.SUCCESS) {
+                          val r = tts?.setLanguage(Locale.forLanguageTag("tr-TR"))
+                          ttsReady = true
+                          if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
+                              js("toast('Türkçe ses verisi yok, telefon ayarlarından indir')")
+                          }
+                          tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                              override fun onStart(utteranceId: String?) { js("onTts('start')") }
+                              override fun onDone(utteranceId: String?) { js("onTts('done')") }
+                              @Deprecated("Deprecated in Java")
+                              override fun onError(utteranceId: String?) { js("onTts('done')") }
+                          })
+                      }
+                  }
+              }
+
+              private fun speakNow(text: String) {
+                  if (!ttsReady) {
+                      js("toast('Ses motoru hazır değil')")
+                      js("onTts('done')")
+                      return
+                  }
+                  val t = if (text.length > 3500) text.take(3500) else text
+                  tts?.speak(t, TextToSpeech.QUEUE_FLUSH, null, "novax")
+              }
+
+              // ---------- Speech recognition ----------
+              private fun beginListening() {
+                  if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                      requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 101)
+                      return
+                  }
+                  if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+                      js("onListenError('Konuşma tanıma servisi bulunamadı')")
+                      return
+                  }
+                  tts?.stop()
+                  recognizer?.destroy()
+                  val rec = SpeechRecognizer.createSpeechRecognizer(this)
+                  recognizer = rec
+                  rec.setRecognitionListener(object : RecognitionListener {
+                      override fun onReadyForSpeech(params: Bundle?) { js("onListenState('listening')") }
+                      override fun onBeginningOfSpeech() {}
+                      override fun onRmsChanged(rmsdB: Float) { js("onLevel($rmsdB)") }
+                      override fun onBufferReceived(buffer: ByteArray?) {}
+                      override fun onEndOfSpeech() { js("onListenState('processing')") }
+                      override fun onError(error: Int) {
+                          js("onListenError(${JSONObject.quote(errorText(error))})")
+                      }
+                      override fun onResults(results: Bundle?) {
+                          val t = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                              ?.firstOrNull() ?: ""
+                          js("onVoiceResult(${JSONObject.quote(t)})")
+                      }
+                      override fun onPartialResults(partialResults: Bundle?) {
+                          val t = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                              ?.firstOrNull() ?: ""
+                          if (t.isNotEmpty()) js("onPartial(${JSONObject.quote(t)})")
+                      }
+                      override fun onEvent(eventType: Int, params: Bundle?) {}
+                  })
+                  val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                      putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                      putExtra(RecognizerIntent.EXTRA_LANGUAGE, "tr-TR")
+                      putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                  }
+                  rec.startListening(intent)
+              }
+
+              private fun errorText(code: Int): String = when (code) {
+                  SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Seni duyamadım, tekrar dene"
+                  SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Ses tanıma için internet gerekli"
+                  SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Mikrofon izni gerekli"
+                  SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Ses tanıma meşgul, tekrar dene"
+                  SpeechRecognizer.ERROR_AUDIO -> "Mikrofon hatası"
+                  else -> "Ses tanıma hatası ($code)"
+              }
+
+              // ---------- Groq ----------
+              private fun callGroq(key: String, messages: JSONArray): String {
+                  val conn = URL("https://api.groq.com/openai/v1/chat/completions").openConnection() as HttpURLConnection
+                  conn.requestMethod = "POST"
+                  conn.connectTimeout = 15000
+                  conn.readTimeout = 60000
+                  conn.setRequestProperty("Authorization", "Bearer $key")
+                  conn.setRequestProperty("Content-Type", "application/json")
+                  conn.doOutput = true
+                  val body = JSONObject()
+                      .put("model", MODEL)
+                      .put("messages", messages)
+                      .put("temperature", 0.7)
+                      .put("max_tokens", 1024)
+                  conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                  val code = conn.responseCode
+                  val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                  val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
+                  if (code !in 200..299) {
+                      val msg = try {
+                          JSONObject(text).getJSONObject("error").getString("message")
+                      } catch (e: Exception) {
+                          "Sunucu hatası (HTTP $code)"
+                      }
+                      throw Exception(msg)
+                  }
+                  return JSONObject(text).getJSONArray("choices").getJSONObject(0)
+                      .getJSONObject("message").getString("content").trim()
+              }
+
+              // ---------- Service / permissions ----------
+              private fun startNovax() {
+                  val needed = mutableListOf<String>()
+                  if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                      needed.add(Manifest.permission.RECORD_AUDIO)
+                  }
+                  if (Build.VERSION.SDK_INT >= 33 &&
+                      checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                  ) {
+                      needed.add(Manifest.permission.POST_NOTIFICATIONS)
+                  }
+                  if (needed.isNotEmpty()) {
+                      requestPermissions(needed.toTypedArray(), 100)
+                      return
+                  }
+                  launchService()
+              }
+
+              private fun launchService() {
+                  ContextCompat.startForegroundService(this, Intent(this, NovaxService::class.java))
+                  web.postDelayed({ js("onServiceState(${NovaxService.running})") }, 700)
+              }
+
+              override fun onRequestPermissionsResult(
+                  requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+              ) {
+                  super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+                  val micOk = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                  when (requestCode) {
+                      100 -> if (micOk) launchService() else js("toast('Mikrofon izni gerekli')")
+                      101 -> if (micOk) beginListening() else js("onListenError('Mikrofon izni gerekli')")
+                  }
+              }
+
+              private fun askBatteryExemption() {
+                  try {
+                      val pm = getSystemService(POWER_SERVICE) as PowerManager
+                      if (pm.isIgnoringBatteryOptimizations(packageName)) {
+                          js("toast('Pil kısıtlaması zaten kapalı')")
+                          return
+                      }
+                      startActivity(
+                          Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                              data = Uri.parse("package:$packageName")
+                          }
+                      )
+                  } catch (e: Exception) {
+                      js("toast('Ayar açılamadı')")
+                  }
+              }
+
+              // ---------- JS bridge ----------
+              inner class Bridge {
+                  @JavascriptInterface
+                  fun getKey(): String = prefs().getString("groq_key", "") ?: ""
+
+                  @JavascriptInterface
+                  fun saveKey(k: String) {
+                      prefs().edit().putString("groq_key", k.trim()).apply()
+                  }
+
+                  @JavascriptInterface
+                  fun chat(id: Int, historyJson: String) {
+                      Thread {
+                          try {
+                              val key = getKey()
+                              val hist = JSONArray(historyJson)
+                              val msgs = JSONArray()
+                              msgs.put(JSONObject().put("role", "system").put("content", SYSTEM_PROMPT))
+                              for (i in 0 until hist.length()) msgs.put(hist.getJSONObject(i))
+                              val reply = callGroq(key, msgs)
+                              js("onChatResult($id,true,${JSONObject.quote(reply)})")
+                          } catch (e: UnknownHostException) {
+                              js("onChatResult($id,false,${JSONObject.quote("İnternet bağlantısı yok")})")
+                          } catch (e: Exception) {
+                              val m = e.message ?: "Bilinmeyen hata"
+                              js("onChatResult($id,false,${JSONObject.quote(m)})")
+                          }
+                      }.start()
+                  }
+
+                  @JavascriptInterface
+                  fun speak(text: String) { runOnUiThread { speakNow(text) } }
+
+                  @JavascriptInterface
+                  fun stopSpeaking() { runOnUiThread { tts?.stop() } }
+
+                  @JavascriptInterface
+                  fun listen() { runOnUiThread { beginListening() } }
+
+                  @JavascriptInterface
+                  fun stopListen() { runOnUiThread { recognizer?.stopListening() } }
+
+                  @JavascriptInterface
+                  fun toggleService() {
+                      runOnUiThread {
+                          if (NovaxService.running) {
+                              stopService(Intent(this@MainActivity, NovaxService::class.java))
+                              web.postDelayed({ js("onServiceState(${NovaxService.running})") }, 500)
+                          } else {
+                              startNovax()
+                          }
+                      }
+                  }
+
+                  @JavascriptInterface
+                  fun isServiceRunning(): Boolean = NovaxService.running
+
+                  @JavascriptInterface
+                  fun battery() { runOnUiThread { askBatteryExemption() } }
+              }
+          }
+          EOF
+          mkdir -p app/src/main/java/com/novax/app
+          cat > app/src/main/java/com/novax/app/NovaxService.kt <<'EOF'
+          package com.novax.app
+
+          import android.app.Notification
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.PendingIntent
+          import android.app.Service
+          import android.content.Intent
+          import android.content.pm.ServiceInfo
+          import android.os.IBinder
+          import android.os.PowerManager
+          import androidx.core.app.NotificationCompat
+          import androidx.core.app.ServiceCompat
+
+          class NovaxService : Service() {
+
+              companion object {
+                  const val CHANNEL_ID = "novax_service"
+                  const val NOTIF_ID = 1
+                  const val ACTION_STOP = "com.novax.app.STOP"
+
+                  @Volatile
+                  var running = false
+              }
+
+              private var wakeLock: PowerManager.WakeLock? = null
+
+              override fun onCreate() {
+                  super.onCreate()
+                  val channel = NotificationChannel(
+                      CHANNEL_ID, "Novax arka plan", NotificationManager.IMPORTANCE_LOW
+                  )
+                  getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+              }
+
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  if (intent?.action == ACTION_STOP) {
+                      stopForeground(STOP_FOREGROUND_REMOVE)
+                      stopSelf()
+                      return START_NOT_STICKY
+                  }
+
+                  try {
+                      ServiceCompat.startForeground(
+                          this, NOTIF_ID, buildNotification(),
+                          ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                      )
+                  } catch (e: Exception) {
+                      // Izin yoksa veya arka plandan baslatildiysa Android reddeder
+                      stopSelf()
+                      return START_NOT_STICKY
+                  }
+
+                  if (wakeLock == null) {
+                      val pm = getSystemService(POWER_SERVICE) as PowerManager
+                      wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "novax:service").apply {
+                          acquire()
+                      }
+                  }
+
+                  running = true
+                  // Sonraki asamalarda: wake word, ses, Groq burada baslayacak
+                  return START_STICKY
+              }
+
+              private fun buildNotification(): Notification {
+                  val open = PendingIntent.getActivity(
+                      this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+                  )
+                  val stop = PendingIntent.getService(
+                      this, 1,
+                      Intent(this, NovaxService::class.java).setAction(ACTION_STOP),
+                      PendingIntent.FLAG_IMMUTABLE
+                  )
+                  return NotificationCompat.Builder(this, CHANNEL_ID)
+                      .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                      .setContentTitle("Novax çalışıyor")
+                      .setContentText("Arka planda aktif")
+                      .setContentIntent(open)
+                      .addAction(0, "Durdur", stop)
+                      .setOngoing(true)
+                      .setPriority(NotificationCompat.PRIORITY_LOW)
+                      .build()
+              }
+
+              override fun onDestroy() {
+                  running = false
+                  wakeLock?.let { if (it.isHeld) it.release() }
+                  wakeLock = null
+                  super.onDestroy()
+              }
+
+              override fun onBind(intent: Intent?): IBinder? = null
+          }
+          EOF
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          EOF
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          kotlin.code.style=official
+          EOF
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "Novax"
+          include(":app")
+          EOF
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+      - name: APK derle
+        working-directory: proje
+        run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Novax-APK
+          path: proje/app/build/outputs/apk/debug/app-debug.apk
